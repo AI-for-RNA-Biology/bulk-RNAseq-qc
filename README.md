@@ -2,9 +2,9 @@
 
 *Guidelines on RNA-seq QC steps, using `bash` and `R` (`Python` examples will be added later).*
 
-*QC metrics useful to assess the quality fo the RNA-seq experiment, or to detect outliers.*
+*QC metrics useful to assess the quality of the RNA-seq experiment, or to detect outliers.*
 
-### MultiQC
+## MultiQC
 > [!NOTE]
 > We assume you ran STAR or you have access to the STAR alignments.
 
@@ -15,15 +15,16 @@ Code snippet for UBELIX users:
 java -Xmx15G -jar /storage/research/dbmr_luisierlab/resources/local/picard_2.25.2/picard.jar CollectRnaSeqMetrics \
  REF_FLAT=/storage/research/dbmr_rubin_lab/pipeline/ref/anno/hg38/gencode.v48.primary_assembly.annotation.refFlat \
  RIBOSOMAL_INTERVALS=/storage/research/dbmr_luisierlab/resources/ref/hg38/GRCh38.primary_assembly.genome.rRNA.interval_list \
+ REFERENCE_SEQUENCE=/storage/research/dbmr_luisierlab/resources/ref/hg38/GRCh38.primary_assembly.genome.fa \
  STRAND_SPECIFICITY=SECOND_READ_TRANSCRIPTION_STRAND \
  INPUT=star/sampleX.Aligned.sortedByCoord.out.bam \
  OUTPUT=star/sampleX.rnaseq_metrics.txt \
- REFERENCE_SEQUENCE=/storage/research/dbmr_luisierlab/resources/ref/hg38/GRCh38.primary_assembly.genome.fa \
  VERBOSITY=ERROR
 ```
 > [!NOTE]
-> * 16G suffice
-> * The above `STRAND_SPECIFICITY` is the most common for Illumina PEs nowadays. You can double check it by looking at STAR `ReadsPerGene.out.tab` files (if you generated them using `--quantMode GeneCounts`; this info will also be picked up by `MultiQC`), or by visualising the alignments in IGV on few random genes.
+> * 16G suffices
+> * The above `STRAND_SPECIFICITY` is the most common for Illumina PEs nowadays. You can double-check it by looking at STAR `ReadsPerGene.out.tab` files (if you generated them using `--quantMode GeneCounts`; this info will also be picked up by `MultiQC`, see below), or by visualising the alignments in IGV over a few random genes.
+
 > [!TIP]
 > * On UBELIX take advantage of `--qos job_cpu_preemptable`, especially if you have many samples.
 
@@ -34,18 +35,18 @@ multiqc star
 ```
 
 > [!NOTE]
-> Input to `MultiQC` are directories that contain logs and results supported by it. `MultiQC` will scan all the files and look for known reports. In the above case it will also automatically fetch STAR logs. If you generated FastQC reports before, provide their location as well. See usage details [here](https://docs.seqera.io/multiqc/getting_started/running_multiqc).
+> Inputs to `MultiQC` are directories that contain logs and results supported by it. `MultiQC` will scan all the files and look for known reports. In the above case, it will also automatically fetch STAR logs. If you generated FastQC reports before, provide their location as well. See usage details [here](https://docs.seqera.io/multiqc/getting_started/running_multiqc).
 
 
-
-### QC in R
+## RNA-seq counts QC in R
 
 > [!NOTE]
 > We assume `counts` is a dataframe of the raw RNA counts (rows are genes, columns are samples).
 
 #### Plot counts densities
-counts_log2_long <- reshape2::melt(as.matrix(log2(counts + 1)), value.name = "log2_counts", varnames = c("gene", "sample"))
 ```
+counts_log2_long <- reshape2::melt(as.matrix(log2(counts + 1)), value.name = "log2_counts", varnames = c("gene", "sample"))
+
 ggdensity(counts_log2_long, x = "log2_counts",
           color = "sample",
           rug = TRUE,
@@ -60,14 +61,14 @@ ggdensity(counts_log2_long, x = "log2_counts",
 
 #### Define reliably expressed genes (remove genes with low counts)
 
-Checking the fraction of low-expressed genes in your dataset can be useful as a global QC metric, or to detect outliers Expectations depend on the library type (total RNA, or polyA capture), sequencing depth, etc.
+Checking the fraction of low-expressed genes in your dataset can be useful as a global QC metric or for detecting outliers. Expectations depend on the library type (total RNA, or polyA capture), sequencing depth, etc.
 
-In principle, you don't need to remove low-expressed genes when using modern tools for differential gene expression analysis, like `DESeq2` or `EdgeR`, as these tools will handle the counts distribution, and the low-count genes will generally end up with bad p-values. Nevertheless, it is recommended to remove low-expressed genes to avoid false positives, avoid `NA` values in the results, and reduce computational resources.
+In principle, you don't need to remove low-expressed genes when using modern tools for differential gene expression analysis, like `DESeq2` or `EdgeR`, as these tools handle count distributions, and the low-count genes will generally result with bad p-values. Nevertheless, it is recommended to remove low-expressed genes to avoid false positives, avoid `NA` values in the results, and reduce computational resources.
 
-Basically we want to fit a 2-components Gaussian distribution over log counts. The approach is similar to Python's `GMMchi`. We will describe two methods in `R`, `dpGMM` and `mclust`.
+Basically, we want to fit a 2-component Gaussian distribution over log counts. The approach is similar to Python's `GMMchi`. We will describe two methods in `R`: `dpGMM` and `mclust`.
 
 > [!NOTE]
-> `mclust` is simpler to run, and it seems to be slightly more lenient in defining low-expressed genes (will result in fewer low-expressed genes).
+> `mclust` is simpler to run, and it seems to be a bit more lenient in defining low-expressed genes (resulting in slightly fewer low-expressed genes).
 
 **mclust**
 ```
@@ -89,7 +90,7 @@ mclust_fit <- sapply(colnames(counts), function(sample) {
 # Clustering results (1=background, 2=foreground) will be in: mclust_fit[[sample]][["classification"]]
 ```
 > [!NOTE]
-> * Mclust results will be in the mclust_object[["classification"]]
+> * Mclust results will be in the `mclust_object[["classification"]]`
 > * 1 = gene with an unreliable expression level (too low)
 > * 2 = gene with a reliable expression level
 
@@ -105,7 +106,7 @@ mclust_fit.cluster.df <- data.frame(sapply(colnames(counts), function(sample) {
 mclust_fit.filtered_genes <- rownames(mclust_fit.cluster.df)[rowSums(mclust_fit.cluster.df) >= 3]
 ```
 > [!NOTE]
-> The thresholds and rules for filtering out the genes from the count table are up to you. Depends on the number of samples, the number and sizes of the comparison groups, etc.
+> The thresholds and rules for removing genes from the count table are up to you. Depends on the number of samples, the number and sizes of the comparison groups, etc.
 
 **dpGMM**
 ```
